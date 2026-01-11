@@ -45,6 +45,15 @@
 #include "nvdscustomlib_base.hpp"
 #include "cudaEGL.h"
 
+// EGL interop is only available on Tegra/Jetson (aarch64)
+// On x86_64 (cloud/desktop GPUs), NVBUF_MEM_DEFAULT resolves to NVBUF_MEM_CUDA_DEVICE
+// and the EGL code path is never executed at runtime anyway.
+#if defined(__aarch64__)
+#define ENABLE_EGL_INTEROP 1
+#else
+#define ENABLE_EGL_INTEROP 0
+#endif
+
 #include "nvocdr.h"
 
 #define FORMAT_NV12 "NV12"
@@ -207,6 +216,7 @@ bool nvOCDRAlgorithm::SetInitParams(DSCustom_CreateParams *params)
     return false;
   }
 
+#if ENABLE_EGL_INTEROP
   if(m_process_surf->memType == NVBUF_MEM_SURFACE_ARRAY) {
     if (NvBufSurfaceMapEglImage (m_process_surf, 0) != 0) {
       GST_ERROR ("Error:Could not map EglImage from NvBufSurface for nvOCDR");
@@ -227,6 +237,7 @@ bool nvOCDRAlgorithm::SetInitParams(DSCustom_CreateParams *params)
         return false;
     }
   }
+#endif // ENABLE_EGL_INTEROP
 
   m_transform_params.src_rect = new NvBufSurfTransformRect[m_max_batch];
   m_transform_params.dst_rect = new NvBufSurfTransformRect[m_max_batch];
@@ -744,11 +755,16 @@ void nvOCDRAlgorithm::OutputThread(void)
     }
 
     void *imagedata_ptr = NULL;
+#if ENABLE_EGL_INTEROP
     if (m_process_surf->memType == NVBUF_MEM_SURFACE_ARRAY) {
         imagedata_ptr = (uint8_t *)m_egl_frame.frame.pPitch[0];
     } else {
         imagedata_ptr = (uint8_t *)m_process_surf->surfaceList[0].dataPtr;
     }
+#else
+    // On x86_64, always use CUDA device memory path
+    imagedata_ptr = (uint8_t *)m_process_surf->surfaceList[0].dataPtr;
+#endif // ENABLE_EGL_INTEROP
 
     // 2D copy the data to remove padding
     if (m_interbuffer != nullptr)
